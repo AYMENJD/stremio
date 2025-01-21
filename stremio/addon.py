@@ -4,7 +4,7 @@ from http import HTTPStatus as status
 from urllib.parse import parse_qs
 
 import uvicorn
-from blacksheep import Application, Request, json
+from blacksheep import Application, Request, json, HTMLContent
 from blacksheep.settings.json import json_settings
 
 from . import json_dumps, json_loads, lint_manifest
@@ -18,11 +18,18 @@ json_settings.use(
 def json_response(
     data,
     status_code: int = status.OK,
+    headers: dict = None,
 ):
-    return json(
+    res = json(
         data,
         status=status_code,
     )
+
+    if headers:
+        for k, v in headers.items():
+            res.headers.add(k.encode("utf-8"), v.encode("utf-8"))
+
+    return res
 
 
 class Addon:
@@ -85,6 +92,17 @@ class Addon:
         self.__host = host
         self.__port = port
         self.__handlers = {}
+        self.__landing_page_callback = None
+
+        async def landingPage(req: Request):
+            if self.__landing_page_callback:
+                return HTMLContent(await self.__landing_page_callback(req))
+            else:
+                return json_response(
+                    None,
+                    status.TEMPORARY_REDIRECT,
+                    {"Location": "https://github.com/AYMENJD/stremio"},
+                )
 
         async def manifestHandler():
             return json_response(self.manifest)
@@ -119,6 +137,7 @@ class Addon:
                     root_path=os.path.basename(path),
                 )
 
+        self.__app.router.add_get("/", landingPage)
         self.__app.router.add_get("/manifest.json", manifestHandler)
         self.__app.router.add_get("/{resource}/{type_}/{id_}.json", resolveResource)
         self.__app.router.add_get(
@@ -172,8 +191,23 @@ class Addon:
 
             self.__handlers[resource] = handler
 
+    def landing_page(self):
+        """Decorator to add a landing page handler. the function must return a string containing the HTML content"""
+
+        if self.__landing_page_callback:
+            raise ValueError("Landing page handler already exists")
+
+        def decorator(func):
+            self.__landing_page_callback = func
+            return func
+
+        return decorator
+
     def stream(self):
-        """Decorator to add a stream handler"""
+        """
+        Decorator to add a stream handler. It's expected to return a dictionary containing the streams data
+        See: https://github.com/Stremio/stremio-addon-sdk/blob/master/docs/api/responses/stream.md
+        """
 
         def decorator(func):
             self.add_handler("stream", func)
@@ -182,7 +216,10 @@ class Addon:
         return decorator
 
     def meta(self):
-        """Decorator to add a meta handler"""
+        """
+        Decorator to add a meta handler. It's expected to return a dictionary containing the meta data.
+        See: https://github.com/Stremio/stremio-addon-sdk/blob/master/docs/api/responses/meta.md
+        """
 
         def decorator(func):
             self.add_handler("meta", func)
@@ -193,7 +230,10 @@ class Addon:
     def catalog(
         self,
     ):
-        """Decorator to add a catalog handler"""
+        """
+        Decorator to add a catalog handler. It's expected to return a list containing meta data.
+        See: https://github.com/Stremio/stremio-addon-sdk/blob/master/docs/api/requests/defineCatalogHandler.md#returns
+        """
 
         def decorator(func):
             self.add_handler("catalog", func)
@@ -204,7 +244,9 @@ class Addon:
     def subtitles(
         self,
     ):
-        """Decorator to add a subtitles handler"""
+        """Decorator to add a subtitles handler. It's expected to return a dictionary containing the subtitles data.
+        See: https://github.com/Stremio/stremio-addon-sdk/blob/master/docs/api/responses/subtitles.md
+        """
 
         def decorator(func):
             self.add_handler("subtitles", func)
@@ -222,6 +264,9 @@ class Addon:
             self.__app,
             host=self.__host,
             port=self.__port,
-            headers=(("Cache-Control", f"max-age={self.cache_max_age}, public"),),
+            headers=(
+                ("Cache-Control", f"max-age={self.cache_max_age}, public"),
+                ("X-Powered-By", "aymenjd/stremio"),
+            ),
             log_level=self.log_level,
         )
