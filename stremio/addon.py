@@ -50,7 +50,7 @@ class Addon:
             manifest (``dict``):
                 The manifest dictionary containing addon metadata. See: https://github.com/Stremio/stremio-addon-sdk/blob/master/docs/api/responses/manifest.md
 
-            static_dir (``list``, *optional*):
+            static_dir (``str`` || ``list``, *optional*):
                 A list of directories to serve static files from. Default is ``None``
 
             cache_max_age (``int``, *optional*):
@@ -69,13 +69,15 @@ class Addon:
                 The log level for the server. Default is "info"
         """
 
-        assert isinstance(static_dir, (list, type(None))), "static_dir must be a list"
-        assert isinstance(cache_max_age, int), "cache_max_age must be an integer"
+        assert isinstance(static_dir, (list, str, type(None))), (
+            "static_dir must be list or str"
+        )
+        assert isinstance(cache_max_age, int), "cache_max_age must be integer"
 
-        assert isinstance(host, str), "host must be a string"
-        assert isinstance(port, int), "port must be an integer"
-        assert isinstance(public_host, str), "public_host must be a string"
-        assert isinstance(log_level, str), "log_level must be a string"
+        assert isinstance(host, str), "host must be string"
+        assert isinstance(port, int), "port must be integer"
+        assert isinstance(public_host, str), "public_host must be string"
+        assert isinstance(log_level, str), "log_level must be string"
 
         lint_manifest(manifest)
 
@@ -133,6 +135,8 @@ class Addon:
             allow_origins="*",
             allow_headers="*",
         )
+
+        static_dir = [static_dir] if isinstance(static_dir, str) else static_dir
 
         if static_dir:
             for dir_ in static_dir:
