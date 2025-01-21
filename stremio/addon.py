@@ -1,4 +1,5 @@
 import asyncio
+import os.path
 from http import HTTPStatus as status
 from urllib.parse import parse_qs
 
@@ -28,9 +29,12 @@ class Addon:
     def __init__(
         self,
         manifest: dict,
+        static_dir: list = None,
+        cache_max_age: int = 0,
         host: str = "0.0.0.0",
         port: int = 7000,
         public_host: str = "",
+        log_level: str = "info",
     ):
         """
         Create a new Stremio addon
@@ -38,6 +42,12 @@ class Addon:
         Parameters:
             manifest (``dict``):
                 The manifest dictionary containing addon metadata. See: https://github.com/Stremio/stremio-addon-sdk/blob/master/docs/api/responses/manifest.md
+
+            static_dir (``list``, *optional*):
+                A list of directories to serve static files from. Default is ``None``
+
+            cache_max_age (``int``, *optional*):
+                The cache max age for responses. Default is ``0``
 
             host (``str``, *optional*):
                 The host address to bind the server to. Default is "0.0.0.0"
@@ -48,12 +58,23 @@ class Addon:
             public_host (``str``, *optional*):
                 The public host address for the addon. Default is an empty string
 
+            log_level (``str``, *optional*):
+                The log level for the server. Default is "info"
         """
 
+        assert isinstance(static_dir, (list, type(None))), "static_dir must be a list"
+        assert isinstance(cache_max_age, int), "cache_max_age must be an integer"
+
+        assert isinstance(host, str), "host must be a string"
         assert isinstance(port, int), "port must be an integer"
+        assert isinstance(public_host, str), "public_host must be a string"
+        assert isinstance(log_level, str), "log_level must be a string"
+
         lint_manifest(manifest)
 
         self.manifest = manifest
+        self.cache_max_age = cache_max_age
+        self.log_level = log_level
 
         if len(json_dumps(manifest)) > 8192:
             raise manifest(
@@ -87,6 +108,16 @@ class Addon:
             allow_origins="*",
             allow_headers="*",
         )
+
+        if static_dir:
+            for dir_ in static_dir:
+                path = os.path.abspath(dir_)
+                print(f"Serving static files in {path}")
+                self.__app.serve_files(
+                    path,
+                    cache_time=cache_max_age,
+                    root_path=os.path.basename(path),
+                )
 
         self.__app.router.add_get("/manifest.json", manifestHandler)
         self.__app.router.add_get("/{resource}/{type_}/{id_}.json", resolveResource)
@@ -191,5 +222,6 @@ class Addon:
             self.__app,
             host=self.__host,
             port=self.__port,
-            log_config=None,
+            headers=(("Cache-Control", f"max-age={self.cache_max_age}, public"),),
+            log_level=self.log_level,
         )
