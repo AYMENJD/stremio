@@ -4,7 +4,7 @@ from http import HTTPStatus as status
 from urllib.parse import parse_qs
 
 import uvicorn
-from blacksheep import Application, Request, json, HTMLContent
+from blacksheep import Application, Request, json, Response, HTMLContent
 from blacksheep.settings.json import json_settings
 
 from . import json_dumps, json_loads, lint_manifest
@@ -96,7 +96,9 @@ class Addon:
 
         async def landingPage(req: Request):
             if self.__landing_page_callback:
-                return HTMLContent(await self.__landing_page_callback(req))
+                return Response(
+                    200, content=HTMLContent(await self.__landing_page_callback(req))
+                )
             else:
                 return json_response(
                     None,
