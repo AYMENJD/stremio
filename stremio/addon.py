@@ -4,7 +4,8 @@ from http import HTTPStatus as status
 from urllib.parse import parse_qs
 
 import uvicorn
-from blacksheep import Application, Request, json, Response, HTMLContent
+from blacksheep import Application, Request, json, Response, HTMLContent, Content
+from blacksheep.client import ClientSession
 from blacksheep.settings.json import json_settings
 
 from . import json_dumps, json_loads, lint_manifest
@@ -13,6 +14,8 @@ json_settings.use(
     loads=json_loads,
     dumps=json_dumps,
 )
+
+DEFAULT_CENTRAL_API_URL = "https://api.strem.io"
 
 
 def json_response(
@@ -98,6 +101,7 @@ class Addon:
         self.__app = Application()
         self.__host = host
         self.__port = port
+        self.__public_host = public_host
         self.__handlers = {}
         self.__landing_page_callback = None
 
@@ -155,38 +159,37 @@ class Addon:
             "/{resource}/{type_}/{id_}/{extra_arg}.json", resolveResourceExtraArgs
         )
 
-    async def __handle_request(self, req: Request, resource, type_, id_, extra=None):
-        if resource not in self.__handlers:
-            return json_response({"error": "Bad request"}, status.BAD_REQUEST)
+    async def publishToCentral(self, manifest_url: str, api_url: str = None):
+        """Publishes the addon to addon catalogs
 
-        extra_args = (
-            None
-            if not isinstance(extra, str)
-            else {k: v[0] if len(v) == 1 else v for k, v in parse_qs(extra).items()}
-        )
+        Example:
+            .. code-block:: python
 
-        fres = await self.__handlers[resource](
-            {
-                "id": id_,
-                "type": type_,
-                "extraArgs": extra_args,
-            }
-        )
+                >>> await publishToCentral("https://example.com/manifest.json")
+                >>> await publishToCentral("https://example.com/manifest.json", "https://api.example.com")
 
-        if not isinstance(fres, dict):
-            raise ValueError(f"{resource} handler must return a dictionary")
+        Parameters:
+            manifest_url (``str``):
+                URL of the addon manifest to publish
 
-        cache_headers = [
-            f"{v}={fres[k]}" for k, v in self.cache_headers.items() if k in fres
-        ]
+            api_url (``str``, *optional*):
+                Central registry API URL, Default is ``https://api.strem.io``
+        """
+        assert isinstance(manifest_url, str)
 
-        headers = (
-            {"Cache-Control": f"{', '.join(cache_headers)}, public"}
-            if cache_headers
-            else None
-        )
+        api_url = api_url if isinstance(api_url, str) else DEFAULT_CENTRAL_API_URL
 
-        return json_response(data=fres, headers=headers)
+        async with ClientSession(base_url=api_url) as req:
+            res = await req.post(
+                "/api/addonPublish",
+                content=Content(
+                    b"application/json",
+                    data=json_dumps(
+                        {"transportUrl": manifest_url, "transportName": "http"}
+                    ).encode("utf-8"),
+                ),
+            )
+            return res.json(json_loads)
 
     def add_handler(self, resource, handler):
         """
@@ -269,7 +272,8 @@ class Addon:
     def subtitles(
         self,
     ):
-        """Decorator to add a subtitles handler. It's expected to return a dictionary containing the subtitles data.
+        """
+        Decorator to add a subtitles handler. It's expected to return a dictionary containing the subtitles data.
         See: https://github.com/Stremio/stremio-addon-sdk/blob/master/docs/api/responses/subtitles.md
         """
 
@@ -278,6 +282,39 @@ class Addon:
             return func
 
         return decorator
+
+    async def __handle_request(self, req: Request, resource, type_, id_, extra=None):
+        if resource not in self.__handlers:
+            return json_response({"error": "Bad request"}, status.BAD_REQUEST)
+
+        extra_args = (
+            None
+            if not isinstance(extra, str)
+            else {k: v[0] if len(v) == 1 else v for k, v in parse_qs(extra).items()}
+        )
+
+        fres = await self.__handlers[resource](
+            {
+                "id": id_,
+                "type": type_,
+                "extraArgs": extra_args,
+            }
+        )
+
+        if not isinstance(fres, dict):
+            raise ValueError(f"{resource} handler must return a dictionary")
+
+        cache_headers = [
+            f"{v}={fres[k]}" for k, v in self.cache_headers.items() if k in fres
+        ]
+
+        headers = (
+            {"Cache-Control": f"{', '.join(cache_headers)}, public"}
+            if cache_headers
+            else None
+        )
+
+        return json_response(data=fres, headers=headers)
 
     def run(self):
         """Run the addon server; Blocking call"""
