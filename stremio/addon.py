@@ -82,6 +82,11 @@ class Addon:
         self.manifest = manifest
         self.cache_max_age = cache_max_age
         self.log_level = log_level
+        self.cache_headers = {
+            "cacheMaxAge": "max-age",
+            "staleRevalidate": "stale-while-revalidate",
+            "staleError": "stale-if-error",
+        }
 
         if len(json_dumps(manifest)) > 8192:
             raise manifest(
@@ -150,20 +155,34 @@ class Addon:
         if resource not in self.__handlers:
             return json_response({"error": "Bad request"}, status.BAD_REQUEST)
 
-        return json_response(
-            await self.__handlers[resource](
-                {
-                    "id": id_,
-                    "type": type_,
-                    "extraArgs": None
-                    if not isinstance(extra, str)
-                    else dict(
-                        (k, v if len(v) > 1 else v[0])
-                        for k, v in parse_qs(extra).items()
-                    ),
-                }
-            )
+        extra_args = (
+            None
+            if not isinstance(extra, str)
+            else {k: v[0] if len(v) == 1 else v for k, v in parse_qs(extra).items()}
         )
+
+        fres = await self.__handlers[resource](
+            {
+                "id": id_,
+                "type": type_,
+                "extraArgs": extra_args,
+            }
+        )
+
+        if not isinstance(fres, dict):
+            raise ValueError(f"{resource} handler must return a dictionary")
+
+        cache_headers = [
+            f"{v}={fres[k]}" for k, v in self.cache_headers.items() if k in fres
+        ]
+
+        headers = (
+            {"Cache-Control": f"{', '.join(cache_headers)}, public"}
+            if cache_headers
+            else None
+        )
+
+        return json_response(data=fres, headers=headers)
 
     def add_handler(self, resource, handler):
         """
