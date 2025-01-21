@@ -1,1 +1,1 @@
-# stremio-addon-sdk
+# stremio
